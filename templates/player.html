@@ -7,7 +7,7 @@
 <div class="container">
   <audio id="audio" preload="none" tabindex="0">
     {% for audio in audios %}
-    <source src="{{ audio }}" data-track-number="{{ loop.index }}" />
+    <source src="{{ audio[1] }}" data-track-number="{{ loop.index }}" />
     {% endfor %} Your browser does not support HTML5 audio.
   </audio>
 
@@ -63,7 +63,7 @@
       <div class="track-number">{{ loop.index }}</div>
       <div class="track-title">
         <a class="playlist-track" href="#" data-play-track="{{ loop.index }}"
-          >Unknown Title</a
+          >{{ audio[0] }}</a
         >
       </div>
     </div>

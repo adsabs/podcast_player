@@ -1,11 +1,14 @@
 from flask import Flask, request, url_for, render_template
+import json
 
 app = Flask(__name__)
 
 @app.route("/player", methods=["POST"])
 def player():
-  audios = request.form["bibcodes"]
-  audio_list = audios.split(',')
+  audios = json.loads(request.form["sources"])
+  audio_list = [] # in the format [[title, source], ...]
+  for title, source in audios.items():
+    audio_list.append([title, source])
   style = url_for("static", filename="styles.css")
   script = url_for("static", filename="player.js")
   return render_template("player.html", audios=audio_list, style=style, script=script)
