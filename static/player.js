@@ -1,515 +1,391 @@
-var audioPlayer = function () {
-  "use strict";
+/*
+Example: https://setstori.blogspot.com/2016/01/nightmareside.html
+*/
 
-  // Private variables
-  var _currentTrack = null;
-  var _elements = {
-    audio: document.getElementById("audio"),
-    playerButtons: {
-      largeToggleBtn: document.querySelector(".large-toggle-btn"),
-      nextTrackBtn: document.querySelector(".next-track-btn"),
-      previousTrackBtn: document.querySelector(".previous-track-btn"),
-      smallToggleBtn: document.getElementsByClassName("small-toggle-btn"),
-    },
-    progressBar: document.querySelector(".progress-box"),
-    playListRows: document.getElementsByClassName("play-list-row"),
-    trackInfoBox: document.querySelector(".track-info-box"),
-  };
-  var _playAHead = false;
-  var _progressCounter = 0;
-  var _progressBarIndicator =
-    _elements.progressBar.children[0].children[0].children[1];
-  var _trackLoaded = false;
+// Multiple events to a listener
+function addEventListener_multi(element, eventNames, handler) {
+  var events = eventNames.split(" ");
+  events.forEach((e) => element.addEventListener(e, handler, false));
+}
 
-  /**
-   * Determines the buffer progress.
-   *
-   * @param audio The audio element on the page.
-   **/
-  var _bufferProgress = function (audio) {
-    var bufferedTime = (audio.buffered.end(0) * 100) / audio.duration;
-    var progressBuffer =
-      _elements.progressBar.children[0].children[0].children[0];
+// Random numbers in a specific range
+function getRandom(min, max) {
+  min = Math.ceil(min);
+  max = Math.floor(max);
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
 
-    progressBuffer.style.width = bufferedTime + "%";
-  };
+// Position element inside element
+function getRelativePos(elm) {
+  var pPos = elm.parentNode.getBoundingClientRect(); // parent pos
+  var cPos = elm.getBoundingClientRect(); // target pos
+  var pos = {};
 
-  /**
-   * A utility function for getting the event cordinates based on browser type.
-   *
-   * @param e The JavaScript event.
-   **/
-  var _getXY = function (e) {
-    var containerX = _elements.progressBar.offsetLeft;
-    var containerY = _elements.progressBar.offsetTop;
+  (pos.top = cPos.top - pPos.top + elm.parentNode.scrollTop),
+    (pos.right = cPos.right - pPos.right),
+    (pos.bottom = cPos.bottom - pPos.bottom),
+    (pos.left = cPos.left - pPos.left);
 
-    var coords = {
-      x: null,
-      y: null,
-    };
+  return pos;
+}
 
-    var isTouchSuopported = "ontouchstart" in window;
+function formatTime(val) {
+  var h = 0,
+    m = 0,
+    s;
+  val = parseInt(val, 10);
+  if (val > 60 * 60) {
+    h = parseInt(val / (60 * 60), 10);
+    val -= h * 60 * 60;
+  }
+  if (val > 60) {
+    m = parseInt(val / 60, 10);
+    val -= m * 60;
+  }
+  s = val;
+  val = h > 0 ? h + ":" : "";
+  val += m > 0 ? (m < 10 && h > 0 ? "0" : "") + m + ":" : "0:";
+  val += (s < 10 ? "0" : "") + s;
+  return val;
+}
 
-    if (isTouchSuopported) {
-      //For touch devices
-      coords.x = e.clientX - containerX;
-      coords.y = e.clientY - containerY;
+function simp_initTime() {
+  simp_controls.querySelector(".start-time").innerHTML = formatTime(
+    simp_audio.currentTime
+  ); //calculate current value time
+  if (!simp_isStream) {
+    simp_controls.querySelector(".end-time").innerHTML = formatTime(
+      simp_audio.duration
+    ); //calculate total value time
+    simp_progress.value = (simp_audio.currentTime / simp_audio.duration) * 100; //progress bar
+  }
 
-      return coords;
-    } else if (e.offsetX || e.offsetX === 0) {
-      // For webkit browsers
-      coords.x = e.offsetX;
-      coords.y = e.offsetY;
+  // ended of the audio
+  if (simp_audio.currentTime == simp_audio.duration) {
+    simp_controls.querySelector(".simp-plause").classList.remove("fa-pause");
+    simp_controls.querySelector(".simp-plause").classList.add("fa-play");
+    simp_audio.removeEventListener("timeupdate", simp_initTime);
 
-      return coords;
-    } else if (e.layerX || e.layerX === 0) {
-      // For Mozilla firefox
-      coords.x = e.layerX;
-      coords.y = e.layerY;
-
-      return coords;
+    if (simp_isNext) {
+      //auto load next audio
+      var elem;
+      simp_a_index++;
+      if (simp_a_index == simp_a_url.length) {
+        //repeat all audio
+        simp_a_index = 0;
+        elem = simp_a_url[0];
+      } else {
+        elem = simp_a_url[simp_a_index];
+      }
+      simp_changeAudio(elem);
+      simp_setAlbum(simp_a_index);
+    } else {
+      simp_isPlaying = false;
     }
-  };
+  }
+}
 
-  var _handleProgressIndicatorClick = function (e) {
-    var progressBar = document.querySelector(".progress-box");
-    var xCoords = _getXY(e).x;
-
-    return (
-      (xCoords - progressBar.offsetLeft) / progressBar.children[0].offsetWidth
+function simp_initAudio() {
+  // if readyState more than 2, audio file has loaded
+  simp_isLoaded = simp_audio.readyState == 4 ? true : false;
+  simp_isStream = simp_audio.duration == "Infinity" ? true : false;
+  simp_controls.querySelector(".simp-plause").disabled = false;
+  simp_progress.disabled = simp_isStream ? true : false;
+  if (!simp_isStream) {
+    simp_progress.parentNode.classList.remove("simp-load", "simp-loading");
+    simp_controls.querySelector(".end-time").innerHTML = formatTime(
+      simp_audio.duration
     );
-  };
+  }
+  simp_audio.addEventListener("timeupdate", simp_initTime); //tracking load progress
+  if (simp_isLoaded && simp_isPlaying) simp_audio.play();
 
-  /**
-   * Initializes the html5 audio player and the playlist.
-   *
-   **/
-  var initPlayer = function () {
-    if (_currentTrack === 1 || _currentTrack === null) {
-      _elements.playerButtons.previousTrackBtn.disabled = true;
+  // progress bar click event
+  addEventListener_multi(simp_progress, "touchstart mousedown", function (e) {
+    if (simp_isStream) {
+      e.stopPropagation();
+      return false;
     }
-
-    //Adding event listeners to playlist clickable elements.
-    for (var i = 0; i < _elements.playListRows.length; i++) {
-      var smallToggleBtn = _elements.playerButtons.smallToggleBtn[i];
-      var playListLink = _elements.playListRows[i].children[2].children[0];
-
-      //Playlist link clicked.
-      playListLink.addEventListener(
-        "click",
-        function (e) {
-          e.preventDefault();
-          var selectedTrack = parseInt(
-            this.parentNode.parentNode.getAttribute("data-track-row")
-          );
-
-          if (selectedTrack !== _currentTrack) {
-            _resetPlayStatus();
-            _currentTrack = null;
-            _trackLoaded = false;
-          }
-
-          if (_trackLoaded === false) {
-            _currentTrack = parseInt(selectedTrack);
-            _setTrack();
-          } else {
-            _playBack(this);
-          }
-        },
-        false
-      );
-
-      //Small toggle button clicked.
-      smallToggleBtn.addEventListener(
-        "click",
-        function (e) {
-          e.preventDefault();
-          var selectedTrack = parseInt(
-            this.parentNode.getAttribute("data-track-row")
-          );
-
-          if (selectedTrack !== _currentTrack) {
-            _resetPlayStatus();
-            _currentTrack = null;
-            _trackLoaded = false;
-          }
-
-          if (_trackLoaded === false) {
-            _currentTrack = parseInt(selectedTrack);
-            _setTrack();
-          } else {
-            _playBack(this);
-          }
-        },
-        false
-      );
+    if (simp_audio.readyState == 4) {
+      simp_audio.removeEventListener("timeupdate", simp_initTime);
+      simp_audio.pause();
     }
+  });
 
-    //Audio time has changed so update it.
-    _elements.audio.addEventListener("timeupdate", _trackTimeChanged, false);
+  addEventListener_multi(simp_progress, "touchend mouseup", function (e) {
+    if (simp_isStream) {
+      e.stopPropagation();
+      return false;
+    }
+    if (simp_audio.readyState == 4) {
+      simp_audio.currentTime =
+        (simp_progress.value * simp_audio.duration) / 100;
+      simp_audio.addEventListener("timeupdate", simp_initTime);
+      if (simp_isPlaying) simp_audio.play();
+    }
+  });
+}
 
-    //Audio track has ended playing.
-    _elements.audio.addEventListener(
-      "ended",
-      function (e) {
-        _trackHasEnded();
-      },
-      false
-    );
+function simp_loadAudio(elem) {
+  simp_progress.parentNode.classList.add("simp-loading");
+  simp_controls.querySelector(".simp-plause").disabled = true;
+  simp_audio.querySelector("source").src = elem.dataset.src;
+  simp_audio.load();
 
-    //Audio error.
-    _elements.audio.addEventListener(
-      "error",
-      function (e) {
-        switch (e.target.error.code) {
-          case e.target.error.MEDIA_ERR_ABORTED:
-            alert("You aborted the video playback.");
-            break;
-          case e.target.error.MEDIA_ERR_NETWORK:
-            alert("A network error caused the audio download to fail.");
-            break;
-          case e.target.error.MEDIA_ERR_DECODE:
-            alert(
-              "The audio playback was aborted due to a corruption problem or because the video used features your browser did not support."
-            );
-            break;
-          case e.target.error.MEDIA_ERR_SRC_NOT_SUPPORTED:
-            alert(
-              "The video audio not be loaded, either because the server or network failed or because the format is not supported."
-            );
-            break;
-          default:
-            alert("An unknown error occurred.");
-            break;
-        }
-        trackLoaded = false;
-        _resetPlayStatus();
-      },
-      false
-    );
+  simp_audio.volume = parseFloat(simp_v_num / 100); //based on valume input value
+  simp_audio.addEventListener("canplaythrough", simp_initAudio); //play audio without stop for buffering
 
-    //Large toggle button clicked.
-    _elements.playerButtons.largeToggleBtn.addEventListener(
-      "click",
-      function (e) {
-        if (_trackLoaded === false) {
-          _currentTrack = parseInt(1);
-          _setTrack();
+  // if audio fails to load, only IE/Edge 9.0 or above
+  simp_audio.addEventListener("error", function () {
+    alert("Please reload the page.");
+  });
+}
+
+function simp_setAlbum(index) {
+  simp_cover.innerHTML = simp_a_url[index].dataset.cover
+    ? '<div style="background:url(' +
+      simp_a_url[index].dataset.cover +
+      ') no-repeat;background-size:cover;width:80px;height:80px;"></div>'
+    : '<img class="s-ads-icon" src="https://ui.adsabs.harvard.edu/styles/img/transparent_logo.svg" alt="Astrophysics Data System">';
+  simp_title.innerHTML =
+    simp_source[index].querySelector(".simp-source").innerHTML;
+  // simp_artist.innerHTML = simp_source[index].querySelector(".simp-desc")
+  //   ? simp_source[index].querySelector(".simp-desc").innerHTML
+  //   : "";
+}
+
+function simp_changeAudio(elem) {
+  simp_isLoaded = false;
+  simp_controls.querySelector(".simp-prev").disabled =
+    simp_a_index == 0 ? true : false;
+  simp_controls.querySelector(".simp-plause").disabled = simp_auto_load
+    ? true
+    : false;
+  simp_controls.querySelector(".simp-next").disabled =
+    simp_a_index == simp_a_url.length - 1 ? true : false;
+  simp_progress.parentNode.classList.add("simp-load");
+  simp_progress.disabled = true;
+  simp_progress.value = 0;
+  simp_controls.querySelector(".start-time").innerHTML = "00:00";
+  simp_controls.querySelector(".end-time").innerHTML = "00:00";
+  elem =
+    simp_isRandom && simp_isNext
+      ? simp_a_url[getRandom(0, simp_a_url.length - 1)]
+      : elem;
+
+  // playlist, audio is running
+  for (var i = 0; i < simp_a_url.length; i++) {
+    simp_a_url[i].parentNode.classList.remove("simp-active");
+    if (simp_a_url[i] == elem) {
+      simp_a_index = i;
+      simp_a_url[i].parentNode.classList.add("simp-active");
+    }
+  }
+
+  // scrolling to element inside element
+  var simp_active = getRelativePos(simp_source[simp_a_index]);
+  simp_source[simp_a_index].parentNode.scrollTop = simp_active.top;
+
+  if (simp_auto_load || simp_isPlaying) simp_loadAudio(elem);
+
+  if (simp_isPlaying) {
+    simp_controls.querySelector(".simp-plause").classList.remove("fa-play");
+    simp_controls.querySelector(".simp-plause").classList.add("fa-pause");
+  }
+}
+
+function simp_startScript() {
+  ap_simp = document.querySelector("#simp");
+  simp_audio = ap_simp.querySelector("#audio");
+  simp_album = ap_simp.querySelector(".simp-album");
+  simp_cover = simp_album.querySelector(".simp-cover");
+  simp_title = simp_album.querySelector(".simp-title");
+  simp_artist = simp_album.querySelector(".simp-artist");
+  simp_controls = ap_simp.querySelector(".simp-controls");
+  simp_progress = simp_controls.querySelector(".simp-progress");
+  simp_volume = simp_controls.querySelector(".simp-volume");
+  simp_v_slider = simp_volume.querySelector(".simp-v-slider");
+  simp_v_num = simp_v_slider.value; //default volume
+  simp_others = simp_controls.querySelector(".simp-others");
+  simp_auto_load = simp_config.auto_load; //auto load audio file
+
+  if (simp_config.shide_top)
+    simp_album.parentNode.classList.toggle("simp-hide");
+  if (simp_config.shide_btm) {
+    simp_playlist.classList.add("simp-display");
+    simp_playlist.classList.toggle("simp-hide");
+  }
+
+  if (simp_a_url.length <= 1) {
+    simp_controls.querySelector(".simp-prev").style.display = "none";
+    simp_controls.querySelector(".simp-next").style.display = "none";
+    simp_others.querySelector(".simp-plext").style.display = "none";
+    simp_others.querySelector(".simp-random").style.display = "none";
+  }
+
+  // Playlist listeners
+  simp_source.forEach(function (item, index) {
+    if (item.classList.contains("simp-active")) simp_a_index = index; //playlist contains '.simp-active'
+    item.addEventListener("click", function () {
+      simp_audio.removeEventListener("timeupdate", simp_initTime);
+      simp_a_index = index;
+      simp_changeAudio(this.querySelector(".simp-source"));
+      simp_setAlbum(simp_a_index);
+    });
+  });
+
+  // FIRST AUDIO LOAD =======
+  simp_changeAudio(simp_a_url[simp_a_index]);
+  simp_setAlbum(simp_a_index);
+  // FIRST AUDIO LOAD =======
+
+  // Controls listeners
+  simp_controls
+    .querySelector(".simp-plauseward")
+    .addEventListener("click", function (e) {
+      var eles = e.target.classList;
+      if (eles.contains("simp-plause")) {
+        if (simp_audio.paused) {
+          if (!simp_isLoaded) simp_loadAudio(simp_a_url[simp_a_index]);
+          simp_audio.play();
+          simp_isPlaying = true;
+          eles.remove("fa-play");
+          eles.add("fa-pause");
         } else {
-          _playBack();
+          simp_audio.pause();
+          simp_isPlaying = false;
+          eles.remove("fa-pause");
+          eles.add("fa-play");
         }
-      },
-      false
-    );
-
-    //Next track button clicked.
-    _elements.playerButtons.nextTrackBtn.addEventListener(
-      "click",
-      function (e) {
-        if (this.disabled !== true) {
-          _currentTrack++;
-          _trackLoaded = false;
-          _resetPlayStatus();
-          _setTrack();
+      } else {
+        if (eles.contains("simp-prev") && simp_a_index != 0) {
+          simp_a_index = simp_a_index - 1;
+          e.target.disabled = simp_a_index == 0 ? true : false;
+        } else if (
+          eles.contains("simp-next") &&
+          simp_a_index != simp_a_url.length - 1
+        ) {
+          simp_a_index = simp_a_index + 1;
+          e.target.disabled =
+            simp_a_index == simp_a_url.length - 1 ? true : false;
         }
-      },
-      false
-    );
+        simp_audio.removeEventListener("timeupdate", simp_initTime);
+        simp_changeAudio(simp_a_url[simp_a_index]);
+        simp_setAlbum(simp_a_index);
+      }
+    });
 
-    //Previous track button clicked.
-    _elements.playerButtons.previousTrackBtn.addEventListener(
-      "click",
-      function (e) {
-        if (this.disabled !== true) {
-          _currentTrack--;
-          _trackLoaded = false;
-          _resetPlayStatus();
-          _setTrack();
-        }
-      },
-      false
-    );
-
-    //User is moving progress indicator.
-    _progressBarIndicator.addEventListener("mousedown", _mouseDown, false);
-
-    //User stops moving progress indicator.
-    window.addEventListener("mouseup", _mouseUp, false);
-  };
-
-  /**
-   * Handles the mousedown event by a user and determines if the mouse is being moved.
-   *
-   * @param e The event object.
-   **/
-  var _mouseDown = function (e) {
-    window.addEventListener("mousemove", _moveProgressIndicator, true);
-    audio.removeEventListener("timeupdate", _trackTimeChanged, false);
-
-    _playAHead = true;
-  };
-
-  /**
-   * Handles the mouseup event by a user.
-   *
-   * @param e The event object.
-   **/
-  var _mouseUp = function (e) {
-    if (_playAHead === true) {
-      var duration = parseFloat(audio.duration);
-      var progressIndicatorClick = parseFloat(_handleProgressIndicatorClick(e));
-      window.removeEventListener("mousemove", _moveProgressIndicator, true);
-
-      audio.currentTime = duration * progressIndicatorClick;
-      audio.addEventListener("timeupdate", _trackTimeChanged, false);
-      _playAHead = false;
-    }
-  };
-
-  /**
-   * Moves the progress indicator to a new point in the audio.
-   *
-   * @param e The event object.
-   **/
-  var _moveProgressIndicator = function (e) {
-    var newPosition = 0;
-    var progressBarOffsetLeft = _elements.progressBar.offsetLeft;
-    var progressBarWidth = 0;
-    var progressBarIndicator =
-      _elements.progressBar.children[0].children[0].children[1];
-    var progressBarIndicatorWidth = _progressBarIndicator.offsetWidth;
-    var xCoords = _getXY(e).x;
-
-    progressBarWidth =
-      _elements.progressBar.children[0].offsetWidth - progressBarIndicatorWidth;
-    newPosition = xCoords - progressBarOffsetLeft;
-
-    if (newPosition >= 1 && newPosition <= progressBarWidth) {
-      progressBarIndicator.style.left = newPosition + ".px";
-    }
-    if (newPosition < 0) {
-      progressBarIndicator.style.left = "0";
-    }
-    if (newPosition > progressBarWidth) {
-      progressBarIndicator.style.left = progressBarWidth + "px";
-    }
-  };
-
-  /**
-   * Controls playback of the audio element.
-   *
-   **/
-  var _playBack = function () {
-    if (_elements.audio.paused) {
-      _elements.audio.play();
-      _updatePlayStatus(true);
-      document.title = "\u25B6 " + document.title;
+  // Audio volume
+  simp_volume.addEventListener("click", function (e) {
+    var eles = e.target.classList;
+    if (eles.contains("simp-mute")) {
+      if (eles.contains("fa-volume-up")) {
+        eles.remove("fa-volume-up");
+        eles.add("fa-volume-off");
+        simp_v_slider.value = 0;
+      } else {
+        eles.remove("fa-volume-off");
+        eles.add("fa-volume-up");
+        simp_v_slider.value = simp_v_num;
+      }
     } else {
-      _elements.audio.pause();
-      _updatePlayStatus(false);
-      document.title = document.title.substr(2);
-    }
-  };
-
-  /**
-   * Sets the track if it hasn't already been loaded yet.
-   *
-   **/
-  var _setTrack = function () {
-    var songURL = _elements.audio.children[_currentTrack - 1].src;
-
-    _elements.audio.setAttribute("src", songURL);
-    _elements.audio.load();
-
-    _trackLoaded = true;
-
-    _setTrackTitle(_currentTrack, _elements.playListRows);
-
-    _setActiveItem(_currentTrack, _elements.playListRows);
-
-    _elements.trackInfoBox.style.visibility = "visible";
-
-    _playBack();
-  };
-
-  /**
-   * Sets the activly playing item within the playlist.
-   *
-   * @param currentTrack The current track number being played.
-   * @param playListRows The playlist object.
-   **/
-  var _setActiveItem = function (currentTrack, playListRows) {
-    for (var i = 0; i < playListRows.length; i++) {
-      playListRows[i].children[2].className = "track-title";
-    }
-
-    playListRows[currentTrack - 1].children[2].className =
-      "track-title active-track";
-  };
-
-  /**
-   * Sets the text for the currently playing song.
-   *
-   * @param currentTrack The current track number being played.
-   * @param playListRows The playlist object.
-   **/
-  var _setTrackTitle = function (currentTrack, playListRows) {
-    var trackTitleBox = document.querySelector(
-      ".player .info-box .track-info-box .track-title-text"
-    );
-    var trackTitle = playListRows[currentTrack - 1].children[2].outerText;
-
-    trackTitleBox.innerHTML = null;
-
-    trackTitleBox.innerHTML = trackTitle;
-
-    document.title = trackTitle;
-  };
-
-  /**
-   * Plays the next track when a track has ended playing.
-   *
-   **/
-  var _trackHasEnded = function () {
-    parseInt(_currentTrack);
-    _currentTrack =
-      _currentTrack === _elements.playListRows.length ? 1 : _currentTrack + 1;
-    _trackLoaded = false;
-
-    _resetPlayStatus();
-
-    _setTrack();
-  };
-
-  /**
-   * Updates the time for the song being played.
-   *
-   **/
-  var _trackTimeChanged = function () {
-    var currentTimeBox = document.querySelector(
-      ".player .info-box .track-info-box .audio-time .current-time"
-    );
-    var currentTime = audio.currentTime;
-    var duration = audio.duration;
-    var durationBox = document.querySelector(
-      ".player .info-box .track-info-box .audio-time .duration"
-    );
-    var trackCurrentTime = _trackTime(currentTime);
-    var trackDuration = _trackTime(duration);
-
-    currentTimeBox.innerHTML = null;
-    currentTimeBox.innerHTML = trackCurrentTime;
-
-    durationBox.innerHTML = null;
-    durationBox.innerHTML = trackDuration;
-
-    _updateProgressIndicator(audio);
-    _bufferProgress(audio);
-  };
-
-  /**
-   * A utility function for converting a time in miliseconds to a readable time of minutes and seconds.
-   *
-   * @param seconds The time in seconds.
-   *
-   * @return time The time in minutes and/or seconds.
-   **/
-  var _trackTime = function (seconds) {
-    var min = 0;
-    var sec = Math.floor(seconds);
-    var time = 0;
-
-    min = Math.floor(sec / 60);
-
-    min = min >= 10 ? min : "0" + min;
-
-    sec = Math.floor(sec % 60);
-
-    sec = sec >= 10 ? sec : "0" + sec;
-
-    time = min + ":" + sec;
-
-    return time;
-  };
-
-  /**
-   * Updates both the large and small toggle buttons accordingly.
-   *
-   * @param audioPlaying A booean value indicating if audio is playing or paused.
-   **/
-  var _updatePlayStatus = function (audioPlaying) {
-    if (audioPlaying) {
-      _elements.playerButtons.largeToggleBtn.children[0].className =
-        "large-pause-btn";
-
-      _elements.playerButtons.smallToggleBtn[
-        _currentTrack - 1
-      ].children[0].className = "small-pause-btn";
-    } else {
-      _elements.playerButtons.largeToggleBtn.children[0].className =
-        "large-play-btn";
-
-      _elements.playerButtons.smallToggleBtn[
-        _currentTrack - 1
-      ].children[0].className = "small-play-btn";
-    }
-
-    //Update next and previous buttons accordingly
-    _elements.playerButtons.previousTrackBtn.disabled = _currentTrack === 1;
-    _elements.playerButtons.previousTrackBtn.className =
-      _currentTrack === 1
-        ? "previous-track-btn disabled"
-        : "previous-track-btn";
-
-    _elements.playerButtons.nextTrackBtn.disabled =
-      _currentTrack === _elements.playListRows.length;
-    _elements.playerButtons.nextTrackBtn.className =
-      _currentTrack === _elements.playListRows.length
-        ? "next-track-btn disabled"
-        : "next-track-btn";
-  };
-
-  /**
-   * Updates the location of the progress indicator according to how much time left in audio.
-   *
-   **/
-  var _updateProgressIndicator = function () {
-    var currentTime = parseFloat(_elements.audio.currentTime);
-    var duration = parseFloat(_elements.audio.duration);
-    var indicatorLocation = 0;
-    var progressBarWidth = parseFloat(_elements.progressBar.offsetWidth);
-    var progressIndicatorWidth = parseFloat(_progressBarIndicator.offsetWidth);
-    var progressBarIndicatorWidth = progressBarWidth - progressIndicatorWidth;
-
-    indicatorLocation = progressBarIndicatorWidth * (currentTime / duration);
-
-    _progressBarIndicator.style.left = indicatorLocation + "px";
-  };
-
-  /**
-   * Resets all toggle buttons to be play buttons.
-   *
-   **/
-  var _resetPlayStatus = function () {
-    var smallToggleBtn = _elements.playerButtons.smallToggleBtn;
-
-    _elements.playerButtons.largeToggleBtn.children[0].className =
-      "large-play-btn";
-
-    for (var i = 0; i < smallToggleBtn.length; i++) {
-      if (smallToggleBtn[i].children[0].className === "small-pause-btn") {
-        smallToggleBtn[i].children[0].className = "small-play-btn";
+      simp_v_num = simp_v_slider.value;
+      if (simp_v_num != 0) {
+        simp_controls
+          .querySelector(".simp-mute")
+          .classList.remove("fa-volume-off");
+        simp_controls.querySelector(".simp-mute").classList.add("fa-volume-up");
       }
     }
-  };
+    simp_audio.volume = parseFloat(simp_v_slider.value / 100);
+  });
 
-  return {
-    initPlayer: initPlayer,
-  };
-};
+  // Others
+  simp_others.addEventListener("click", function (e) {
+    var eles = e.target.classList;
+    if (eles.contains("simp-plext")) {
+      simp_isNext = simp_isNext && !simp_isRandom ? false : true;
+      if (!simp_isRandom) simp_isRanext = simp_isRanext ? false : true;
+      eles.contains("simp-active") && !simp_isRandom
+        ? eles.remove("simp-active")
+        : eles.add("simp-active");
+    } else if (eles.contains("simp-random")) {
+      simp_isRandom = simp_isRandom ? false : true;
+      if (simp_isNext && !simp_isRanext) {
+        simp_isNext = false;
+        simp_others
+          .querySelector(".simp-plext")
+          .classList.remove("simp-active");
+      } else {
+        simp_isNext = true;
+        simp_others.querySelector(".simp-plext").classList.add("simp-active");
+      }
+      eles.contains("simp-active")
+        ? eles.remove("simp-active")
+        : eles.add("simp-active");
+    } else if (eles.contains("simp-shide-top")) {
+      simp_album.parentNode.classList.toggle("simp-hide");
+    } else if (eles.contains("simp-shide-bottom")) {
+      simp_playlist.classList.add("simp-display");
+      simp_playlist.classList.toggle("simp-hide");
+    }
+  });
+}
 
-(function () {
-  var player = new audioPlayer();
+// Start simple player
+if (document.querySelector("#simp")) {
+  var simp_auto_load,
+    simp_audio,
+    simp_album,
+    simp_cover,
+    simp_title,
+    simp_artist,
+    simp_controls,
+    simp_progress,
+    simp_volume,
+    simp_v_slider,
+    simp_v_num,
+    simp_others;
+  var ap_simp = document.querySelector("#simp");
+  var simp_playlist = ap_simp.querySelector(".simp-playlist");
+  var simp_source = simp_playlist.querySelectorAll("li");
+  var simp_a_url = simp_playlist.querySelectorAll("[data-src]");
+  var simp_a_index = 0;
+  var simp_isPlaying = false;
+  var simp_isNext = true; //auto play
+  var simp_isRandom = false; //play random
+  var simp_isRanext = false; //check if before random starts, simp_isNext value is true
+  var simp_isStream = false; //radio streaming
+  var simp_isLoaded = false; //audio file has loaded
+  var simp_config = ap_simp.dataset.config
+    ? JSON.parse(ap_simp.dataset.config)
+    : {
+        shide_top: false, //show/hide album
+        shide_btm: false, //show/hide playlist
+        auto_load: false, //auto load audio file
+      };
 
-  player.initPlayer();
-})();
+  var simp_elem = "";
+  simp_elem +=
+    '<audio id="audio" preload><source src="" type="audio/mpeg"></audio>';
+  simp_elem +=
+    '<div class="simp-display"><div class="simp-album w-full flex-wrap"><div class="simp-cover"><i class="fa fa-music fa-5x"></i></div><div class="simp-info"><div class="simp-title">Title</div><div class="simp-artist"></div></div></div></div>';
+  simp_elem += '<div class="simp-controls flex-wrap flex-align">';
+  simp_elem +=
+    '<div class="simp-plauseward flex flex-align"><button type="button" class="simp-prev fa fa-backward" disabled></button><button type="button" class="simp-plause fa fa-play" disabled></button><button type="button" class="simp-next fa fa-forward" disabled></button></div>';
+  simp_elem +=
+    '<div class="simp-tracker simp-load"><input class="simp-progress" type="range" min="0" max="100" value="0" disabled/><div class="simp-buffer"></div></div>';
+  simp_elem +=
+    '<div class="simp-time flex flex-align"><span class="start-time">00:00</span><span class="simp-slash">&#160;/&#160;</span><span class="end-time">00:00</span></div>';
+  simp_elem +=
+    '<div class="simp-volume flex flex-align"><button type="button" class="simp-mute fa fa-volume-up"></button><input class="simp-v-slider" type="range" min="0" max="100" value="100"/></div>';
+  simp_elem +=
+    '<div class="simp-others flex flex-align"><button type="button" class="simp-plext fa fa-play-circle simp-active" title="Auto Play"></button><button type="button" class="simp-random fa fa-random" title="Random"></button><div class="simp-shide"><button type="button" class="simp-shide-top fa fa-caret-up" title="Show/Hide Album"></button><button type="button" class="simp-shide-bottom fa fa-caret-down" title="Show/Hide Playlist"></button></div></div>';
+  simp_elem += "</div>"; //simp-controls
+
+  var simp_player = document.createElement("div");
+  simp_player.classList.add("simp-player");
+  simp_player.innerHTML = simp_elem;
+  ap_simp.insertBefore(simp_player, simp_playlist);
+  simp_startScript();
+}
