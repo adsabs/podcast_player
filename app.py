@@ -1,9 +1,9 @@
 from flask import Flask, request, url_for, render_template
 import json
 
-def create_app(**config):
-  app = Flask(__name__)
+app = Flask(__name__)
 
+def create_app(**config):
   return app
 
 @app.route("/player", methods=["POST"])
